@@ -312,6 +312,16 @@ def save_template():
     print(f"Saved template: {name}")
     return jsonify({"message": f"Template '{name}' saved successfully."}), 200
 
+@app.route('/get-template/<template_name>', methods=['GET'])
+def get_template(template_name):
+    """Retrieve a specific template by name."""
+    if template_name not in template_store:
+        return jsonify({"error": "Template not found."}), 404
+    return jsonify({
+        "name": template_name,
+        "content": template_store[template_name]
+    }), 200
+
 
 # --- Main Entry Point ---
 

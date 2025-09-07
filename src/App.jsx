@@ -28,10 +28,7 @@ export default function App() {
     };
 
     const [vectorDatabase, setVectorDatabase] = useState({ vectors: 0, files: 0, storage: '0 MB' });
-    const savedTemplates = [
-        { name: 'Business Report Template', description: 'Professional business report with executive summary' },
-        { name: 'Research Paper Template', description: 'Academic research paper format' },
-    ];
+    const [savedTemplates, setSavedTemplates] = useState([]);
 
     const handleLogin = (e) => {
         e.preventDefault();
@@ -44,7 +41,7 @@ export default function App() {
         setCurrentPage('login');
     };
 
-    // Fetch vector database statistics
+    // Fetch vector database statistics and saved templates
     const fetchVectorStats = useCallback(async () => {
         try {
             const response = await fetch('http://127.0.0.1:5000/status');
@@ -55,6 +52,15 @@ export default function App() {
                     files: data.total_files || 0,
                     storage: `${(data.total_vectors * 0.01).toFixed(1)} MB` // Rough estimate
                 });
+                
+                // Update saved templates from backend
+                if (data.templates_in_memory && Array.isArray(data.templates_in_memory)) {
+                    const templateList = data.templates_in_memory.map(templateName => ({
+                        name: templateName,
+                        description: `Saved template: ${templateName}`
+                    }));
+                    setSavedTemplates(templateList);
+                }
             }
         } catch (error) {
             console.error('Failed to fetch vector stats:', error);
@@ -84,7 +90,7 @@ export default function App() {
                 <Sidebar vectorDatabase={vectorDatabase} savedTemplates={savedTemplates} recentFiles={recentFiles} onLogout={handleLogout} />
                 <main className="flex-1 p-8 overflow-y-auto">
                     {currentPage === 'dataProcessing' && <DataProcessingPage onUploadSuccess={(file) => { addRecentFile(file); fetchVectorStats(); }} />}
-                    {currentPage === 'templateBuilder' && <TemplateBuilderPage />}
+                    {currentPage === 'templateBuilder' && <TemplateBuilderPage onTemplateSaved={fetchVectorStats} />}
                     {currentPage === 'documentGenerator' && <DocumentGeneratorPage />}
                 </main>
             </div>
@@ -234,7 +240,7 @@ const DataProcessingPage = ({ onUploadSuccess }) => {
 
 
 // --- MODIFIED: The New TemplateBuilderPage ---
-const TemplateBuilderPage = () => {
+const TemplateBuilderPage = ({ onTemplateSaved }) => {
     // NEW: State management for the chat, template, and loading status
     const [chatHistory, setChatHistory] = useState([
         { sender: 'ai', text: "Hello! I'm here to help you create document templates. What type of template would you like to create?" }
@@ -299,6 +305,11 @@ const TemplateBuilderPage = () => {
             });
             const data = await response.json();
             alert(data.message);
+            
+            // Refresh the templates list after successful save
+            if (onTemplateSaved) {
+                onTemplateSaved();
+            }
         } catch (error) {
             console.error("Save template error:", error);
             alert("Failed to save the template.");
