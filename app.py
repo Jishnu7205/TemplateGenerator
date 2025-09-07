@@ -322,6 +322,73 @@ def get_template(template_name):
         "content": template_store[template_name]
     }), 200
 
+@app.route('/generate-document', methods=['POST'])
+def generate_document():
+    """
+    Generate a document using a template and user query.
+    Expects JSON with 'template_name', 'user_query', and optional 'format' (default 'markdown').
+    """
+    if not client:
+        return jsonify({"error": "Gemini client is not configured. Check API key."}), 500
+
+    data = request.json
+    template_name = data.get('template_name')
+    user_query = data.get('user_query')
+    output_format = data.get('format', 'markdown')
+
+    if not template_name or not user_query:
+        return jsonify({"error": "Template name and user query are required."}), 400
+
+    if template_name not in template_store:
+        return jsonify({"error": "Template not found."}), 404
+
+    template_content = template_store[template_name]
+
+    # Create a comprehensive prompt for document generation
+    full_prompt = f"""
+    You are an AI assistant that generates documents based on templates and user requirements.
+    
+    TEMPLATE TO USE:
+    ---
+    {template_content}
+    ---
+    
+    USER'S REQUEST: "{user_query}"
+    
+    INSTRUCTIONS:
+    1. Use the provided template as the structure for the document
+    2. Fill in the template with relevant content based on the user's request
+    3. Make the content specific, detailed, and professional
+    4. Maintain the template's formatting and structure
+    5. If the user's request doesn't provide enough information for certain sections, use reasonable assumptions or mark sections as "[TO BE FILLED]"
+    6. Return the complete document in {output_format} format
+    
+    GENERATED DOCUMENT:
+    """
+
+    try:
+        print(f"Generating document with template: {template_name}")
+        
+        # Use Gemini to generate the document
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=full_prompt
+        )
+        
+        generated_content = response.text.strip()
+        print("Document generated successfully.")
+        
+        return jsonify({
+            "template_name": template_name,
+            "user_query": user_query,
+            "generated_content": generated_content,
+            "format": output_format
+        }), 200
+
+    except Exception as e:
+        print(f"Error generating document: {e}")
+        return jsonify({"error": "Failed to generate document."}), 500
+
 
 # --- Main Entry Point ---
 

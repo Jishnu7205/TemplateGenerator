@@ -91,7 +91,7 @@ export default function App() {
                 <main className="flex-1 p-8 overflow-y-auto">
                     {currentPage === 'dataProcessing' && <DataProcessingPage onUploadSuccess={(file) => { addRecentFile(file); fetchVectorStats(); }} />}
                     {currentPage === 'templateBuilder' && <TemplateBuilderPage onTemplateSaved={fetchVectorStats} />}
-                    {currentPage === 'documentGenerator' && <DocumentGeneratorPage />}
+                    {currentPage === 'documentGenerator' && <DocumentGeneratorPage savedTemplates={savedTemplates} />}
                 </main>
             </div>
         </div>
@@ -373,9 +373,179 @@ const TemplateBuilderPage = ({ onTemplateSaved }) => {
 };
 
 
-const DocumentGeneratorPage = () => ( /* ... No changes needed here ... */
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full"><Panel title="Document Preview" actionButton={<button className="text-sm bg-[#00aaff] hover:bg-[#0099e6] text-white py-1 px-3 rounded-md transition">Download Document</button>}><EmptyState icon={<DocumentIcon />} text="Select a template and start generating your document" /></Panel><Panel headerContent={<div className="flex items-center space-x-4"><h2 className="font-semibold text-white">Document Generator</h2><select className="text-sm bg-gray-700 text-white py-1 px-3 rounded-md focus:outline-none"><option>Select Template</option></select><select className="text-sm bg-gray-700 text-white py-1 px-3 rounded-md focus:outline-none"><option>PDF Document</option></select></div>}><div className="flex-1 p-4"><ChatMessage text="Ready to generate your document! Please select a template and specify the format, then tell me what document you'd like to create." /></div><div className="p-4 border-t border-gray-700"><input type="text" placeholder="Tell me what document you want to create..." className="w-full bg-[#3c3c3c] border border-gray-600 rounded-md p-3 text-white focus:ring-2 focus:ring-[#00aaff] focus:outline-none" /></div></Panel></div>
-);
+const DocumentGeneratorPage = ({ savedTemplates }) => {
+    const [selectedTemplate, setSelectedTemplate] = useState('');
+    const [userQuery, setUserQuery] = useState('');
+    const [generatedDocument, setGeneratedDocument] = useState('');
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [documentFormat, setDocumentFormat] = useState('markdown');
+    const [editableContent, setEditableContent] = useState('');
+    const [isEditing, setIsEditing] = useState(false);
+
+    // Handle document generation
+    const handleGenerateDocument = async (e) => {
+        e.preventDefault();
+        if (!selectedTemplate || !userQuery.trim() || isGenerating) return;
+
+        setIsGenerating(true);
+        try {
+            const response = await fetch('http://127.0.0.1:5000/generate-document', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    template_name: selectedTemplate,
+                    user_query: userQuery,
+                    format: documentFormat
+                }),
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Failed to generate document');
+            }
+
+            const data = await response.json();
+            setGeneratedDocument(data.generated_content);
+            setEditableContent(data.generated_content);
+        } catch (error) {
+            console.error("Document generation error:", error);
+            alert(`Failed to generate document: ${error.message}`);
+        } finally {
+            setIsGenerating(false);
+        }
+    };
+
+    // Handle downloading the document
+    const handleDownloadDocument = () => {
+        if (!editableContent) return;
+        
+        const blob = new Blob([editableContent], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `generated-document-${Date.now()}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    return (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
+            {/* Document Preview Panel */}
+            <Panel 
+                title="Document Preview" 
+                actionButton={
+                    <div className="flex space-x-2">
+                        {editableContent && (
+                            <button 
+                                onClick={() => setIsEditing(!isEditing)}
+                                className="text-sm bg-green-600 hover:bg-green-700 text-white py-1 px-3 rounded-md transition"
+                            >
+                                {isEditing ? 'Preview' : 'Edit'}
+                            </button>
+                        )}
+                        <button 
+                            onClick={handleDownloadDocument}
+                            disabled={!editableContent}
+                            className="text-sm bg-[#00aaff] hover:bg-[#0099e6] disabled:bg-gray-500 text-white py-1 px-3 rounded-md transition"
+                        >
+                            Download
+                        </button>
+                    </div>
+                }
+            >
+                {editableContent ? (
+                    <div className="flex-1 p-4 overflow-y-auto">
+                        {isEditing ? (
+                            <textarea
+                                value={editableContent}
+                                onChange={(e) => setEditableContent(e.target.value)}
+                                className="w-full h-full bg-[#3c3c3c] border border-gray-600 rounded-md p-3 text-white focus:ring-2 focus:ring-[#00aaff] focus:outline-none resize-none font-mono text-sm"
+                                placeholder="Edit your document content here..."
+                            />
+                        ) : (
+                            <div className="prose prose-invert max-w-none">
+                                <ReactMarkdown>{editableContent}</ReactMarkdown>
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <EmptyState icon={<DocumentIcon />} text="Select a template and generate your document" />
+                )}
+            </Panel>
+
+            {/* Document Generator Panel */}
+            <Panel 
+                headerContent={
+                    <div className="flex items-center space-x-4">
+                        <h2 className="font-semibold text-white">Document Generator</h2>
+                        <select 
+                            value={selectedTemplate}
+                            onChange={(e) => setSelectedTemplate(e.target.value)}
+                            className="text-sm bg-gray-700 text-white py-1 px-3 rounded-md focus:outline-none"
+                            disabled={savedTemplates.length === 0}
+                        >
+                            <option value="">
+                                {savedTemplates.length === 0 ? 'No templates available' : 'Select Template'}
+                            </option>
+                            {savedTemplates.map(template => (
+                                <option key={template.name} value={template.name}>
+                                    {template.name}
+                                </option>
+                            ))}
+                        </select>
+                        <select 
+                            value={documentFormat}
+                            onChange={(e) => setDocumentFormat(e.target.value)}
+                            className="text-sm bg-gray-700 text-white py-1 px-3 rounded-md focus:outline-none"
+                        >
+                            <option value="markdown">Markdown</option>
+                            <option value="html">HTML</option>
+                            <option value="text">Plain Text</option>
+                        </select>
+                    </div>
+                }
+            >
+                <div className="flex-1 p-4">
+                    {savedTemplates.length === 0 ? (
+                        <ChatMessage text="No templates available. Please create a template first in the Template Builder section." />
+                    ) : !selectedTemplate ? (
+                        <ChatMessage text="Please select a template from the dropdown above to get started." />
+                    ) : (
+                        <ChatMessage text={`Template "${selectedTemplate}" selected. Now describe what document you want to create using this template.`} />
+                    )}
+                </div>
+                
+                <form onSubmit={handleGenerateDocument} className="p-4 border-t border-gray-700">
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-2">
+                                What document would you like to create?
+                            </label>
+                            <textarea
+                                value={userQuery}
+                                onChange={(e) => setUserQuery(e.target.value)}
+                                placeholder="Describe the document you want to create... (e.g., 'Create a business report about Q4 sales performance with data from our marketing team')"
+                                className="w-full bg-[#3c3c3c] border border-gray-600 rounded-md p-3 text-white focus:ring-2 focus:ring-[#00aaff] focus:outline-none resize-none"
+                                rows={3}
+                                disabled={isGenerating || !selectedTemplate}
+                            />
+                        </div>
+                        
+                        <button
+                            type="submit"
+                            disabled={!selectedTemplate || !userQuery.trim() || isGenerating}
+                            className="w-full bg-[#00aaff] hover:bg-[#0099e6] disabled:bg-gray-500 text-white font-bold py-2 px-4 rounded-md transition"
+                        >
+                            {isGenerating ? 'Generating Document...' : 'Generate Document'}
+                        </button>
+                    </div>
+                </form>
+            </Panel>
+        </div>
+    );
+};
 
 // --- Helper Components for UI ---
 const Panel = ({ title, actionButton, headerContent, children }) => ( <div className="bg-[#2a2a2a] rounded-lg border border-gray-700 flex flex-col h-full"><div className="p-4 border-b border-gray-700 flex justify-between items-center">{headerContent ? headerContent : <h2 className="font-semibold text-white">{title}</h2>}{actionButton}</div><div className="flex-1 flex flex-col overflow-hidden">{children}</div></div> );
