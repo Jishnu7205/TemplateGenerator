@@ -1,6 +1,7 @@
 // App.jsx
 
 import React, { useState, useCallback } from 'react';
+import html2pdf from 'html2pdf.js';
 import { useDropzone } from 'react-dropzone';
 // NEW: Import the markdown renderer
 import ReactMarkdown from 'react-markdown';
@@ -381,6 +382,8 @@ const DocumentGeneratorPage = ({ savedTemplates }) => {
     const [documentFormat, setDocumentFormat] = useState('markdown');
     const [editableContent, setEditableContent] = useState('');
     const [isEditing, setIsEditing] = useState(false);
+    const [dataChunksUsed, setDataChunksUsed] = useState(0);
+    const previewRef = React.useRef(null);
 
     // Handle document generation
     const handleGenerateDocument = async (e) => {
@@ -395,7 +398,8 @@ const DocumentGeneratorPage = ({ savedTemplates }) => {
                 body: JSON.stringify({
                     template_name: selectedTemplate,
                     user_query: userQuery,
-                    format: documentFormat
+                    format: documentFormat,
+                    n_data_results: 5
                 }),
             });
 
@@ -407,6 +411,7 @@ const DocumentGeneratorPage = ({ savedTemplates }) => {
             const data = await response.json();
             setGeneratedDocument(data.generated_content);
             setEditableContent(data.generated_content);
+            setDataChunksUsed(data.data_chunks_used || 0);
         } catch (error) {
             console.error("Document generation error:", error);
             alert(`Failed to generate document: ${error.message}`);
@@ -416,9 +421,8 @@ const DocumentGeneratorPage = ({ savedTemplates }) => {
     };
 
     // Handle downloading the document
-    const handleDownloadDocument = () => {
+    const handleDownloadMarkdown = () => {
         if (!editableContent) return;
-        
         const blob = new Blob([editableContent], { type: 'text/markdown' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -428,6 +432,24 @@ const DocumentGeneratorPage = ({ savedTemplates }) => {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    };
+
+    const handleDownloadPdf = async () => {
+        if (!editableContent || !previewRef.current) return;
+        const element = previewRef.current;
+        const opt = {
+            margin:       10,
+            filename:     `generated-document-${Date.now()}.pdf`,
+            image:        { type: 'jpeg', quality: 0.98 },
+            html2canvas:  { scale: 2, useCORS: true },
+            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+        try {
+            await html2pdf().set(opt).from(element).save();
+        } catch (e) {
+            console.error('PDF generation failed', e);
+            alert('Failed to generate PDF.');
+        }
     };
 
     return (
@@ -445,18 +467,27 @@ const DocumentGeneratorPage = ({ savedTemplates }) => {
                                 {isEditing ? 'Preview' : 'Edit'}
                             </button>
                         )}
-                        <button 
-                            onClick={handleDownloadDocument}
-                            disabled={!editableContent}
-                            className="text-sm bg-[#00aaff] hover:bg-[#0099e6] disabled:bg-gray-500 text-white py-1 px-3 rounded-md transition"
-                        >
-                            Download
-                        </button>
+                        {editableContent && (
+                            <>
+                                <button 
+                                    onClick={handleDownloadMarkdown}
+                                    className="text-sm bg-[#00aaff] hover:bg-[#0099e6] text-white py-1 px-3 rounded-md transition"
+                                >
+                                    Download .md
+                                </button>
+                                <button 
+                                    onClick={handleDownloadPdf}
+                                    className="text-sm bg-purple-600 hover:bg-purple-700 text-white py-1 px-3 rounded-md transition"
+                                >
+                                    Download PDF
+                                </button>
+                            </>
+                        )}
                     </div>
                 }
             >
                 {editableContent ? (
-                    <div className="flex-1 p-4 overflow-y-auto">
+                    <div className="flex-1 p-4 overflow-y-auto" ref={previewRef}>
                         {isEditing ? (
                             <textarea
                                 value={editableContent}
@@ -513,7 +544,7 @@ const DocumentGeneratorPage = ({ savedTemplates }) => {
                     ) : !selectedTemplate ? (
                         <ChatMessage text="Please select a template from the dropdown above to get started." />
                     ) : (
-                        <ChatMessage text={`Template "${selectedTemplate}" selected. Now describe what document you want to create using this template.`} />
+                        <ChatMessage text={`Template "${selectedTemplate}" selected. Describe the document you want to create. We'll automatically use your uploaded data to ground the content.`} />
                     )}
                 </div>
                 
@@ -526,12 +557,14 @@ const DocumentGeneratorPage = ({ savedTemplates }) => {
                             <textarea
                                 value={userQuery}
                                 onChange={(e) => setUserQuery(e.target.value)}
-                                placeholder="Describe the document you want to create... (e.g., 'Create a business report about Q4 sales performance with data from our marketing team')"
+                                placeholder="Describe the document you want to create... (e.g., 'Create a business report about Q4 sales performance')"
                                 className="w-full bg-[#3c3c3c] border border-gray-600 rounded-md p-3 text-white focus:ring-2 focus:ring-[#00aaff] focus:outline-none resize-none"
                                 rows={3}
                                 disabled={isGenerating || !selectedTemplate}
                             />
                         </div>
+                        
+                        {/* Data query UI removed; backend auto-fetches relevant chunks using user query */}
                         
                         <button
                             type="submit"
@@ -540,6 +573,12 @@ const DocumentGeneratorPage = ({ savedTemplates }) => {
                         >
                             {isGenerating ? 'Generating Document...' : 'Generate Document'}
                         </button>
+                        
+                        {dataChunksUsed > 0 && (
+                            <div className="text-sm text-green-400 text-center">
+                                ✓ Used {dataChunksUsed} data chunks from your uploaded documents
+                            </div>
+                        )}
                     </div>
                 </form>
             </Panel>

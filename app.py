@@ -325,8 +325,9 @@ def get_template(template_name):
 @app.route('/generate-document', methods=['POST'])
 def generate_document():
     """
-    Generate a document using a template and user query.
+    Generate a document using a template, user query, and top similar data from the vector database.
     Expects JSON with 'template_name', 'user_query', and optional 'format' (default 'markdown').
+    Always uses the user_query to retrieve relevant data chunks automatically.
     """
     if not client:
         return jsonify({"error": "Gemini client is not configured. Check API key."}), 500
@@ -335,6 +336,7 @@ def generate_document():
     template_name = data.get('template_name')
     user_query = data.get('user_query')
     output_format = data.get('format', 'markdown')
+    n_data_results = data.get('n_data_results', 5)  # Number of data chunks to include
 
     if not template_name or not user_query:
         return jsonify({"error": "Template name and user query are required."}), 400
@@ -343,10 +345,51 @@ def generate_document():
         return jsonify({"error": "Template not found."}), 404
 
     template_content = template_store[template_name]
+    relevant_data = ""
+
+    # Always search for relevant data using the user's query
+    try:
+        print(f"Searching for relevant data with user query: {user_query}")
+        
+        # Generate embedding for the user query
+        query_embedding = model.encode([user_query])
+        
+        # Search in ChromaDB
+        search_results = vector_collection.query(
+            query_embeddings=query_embedding.tolist(),
+            n_results=n_data_results
+        )
+        
+        # Format the relevant data
+        if search_results['documents'] and search_results['documents'][0]:
+            data_chunks = []
+            for i, doc in enumerate(search_results['documents'][0]):
+                metadata = search_results['metadatas'][0][i] if search_results['metadatas'] else {}
+                filename = metadata.get('filename', 'Unknown file') if metadata else 'Unknown file'
+                data_chunks.append(f"Source: {filename}\nContent: {doc}\n")
+            
+            relevant_data = "\n".join(data_chunks)
+            print(f"Found {len(data_chunks)} relevant data chunks")
+        else:
+            print("No relevant data found")
+            
+    except Exception as e:
+        print(f"Error searching for data: {e}")
+        # Continue without data if search fails
 
     # Create a comprehensive prompt for document generation
+    data_section = ""
+    if relevant_data:
+        data_section = f"""
+    
+    RELEVANT DATA FROM YOUR DATABASE:
+    ---
+    {relevant_data}
+    ---
+    """
+
     full_prompt = f"""
-    You are an AI assistant that generates documents based on templates and user requirements.
+    You are an AI assistant that generates documents based on templates, user requirements, and relevant data.
     
     TEMPLATE TO USE:
     ---
@@ -354,14 +397,16 @@ def generate_document():
     ---
     
     USER'S REQUEST: "{user_query}"
-    
+    {data_section}
     INSTRUCTIONS:
     1. Use the provided template as the structure for the document
     2. Fill in the template with relevant content based on the user's request
-    3. Make the content specific, detailed, and professional
-    4. Maintain the template's formatting and structure
-    5. If the user's request doesn't provide enough information for certain sections, use reasonable assumptions or mark sections as "[TO BE FILLED]"
-    6. Return the complete document in {output_format} format
+    3. If relevant data is provided above, use that data to make the document more accurate and specific
+    4. Incorporate facts, figures, and information from the relevant data where appropriate
+    5. Make the content specific, detailed, and professional
+    6. Maintain the template's formatting and structure
+    7. If the user's request doesn't provide enough information for certain sections, use reasonable assumptions or mark sections as "[TO BE FILLED]"
+    8. Return the complete document in {output_format} format
     
     GENERATED DOCUMENT:
     """
@@ -382,7 +427,8 @@ def generate_document():
             "template_name": template_name,
             "user_query": user_query,
             "generated_content": generated_content,
-            "format": output_format
+            "format": output_format,
+            "data_chunks_used": len(relevant_data.split("Source:")) - 1 if relevant_data else 0
         }), 200
 
     except Exception as e:
